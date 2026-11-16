@@ -1,0 +1,2 @@
+Instrument Serif (Instrument) 和 Noto Serif SC (Google, Adobe) 均以 SIL Open Font License 1.1 发布：https://openfontlicense.org
+这里的文件是从 Google Fonts 取的子集。

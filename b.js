@@ -56,13 +56,20 @@ const K = [
   key('stories', L('晨昏线', 'The terminator'),    'luna',  at(LC, .88, .44, -.02, 3.55), null, .1),
   key('contact', L('地出', 'Earthrise'),           'luna',  LC.clone().add(V(1.4, 2.85, .95)), O, -.14),
 ];
-K[0].tgt = skim(O, K[0].pos, V(1, .1, -.25), 36);
+function horizonShot(pos, yawDeg, downDeg) {              // 朝月亮的方向平视，向左偏 yaw 度（月亮就落到右边），再往下看 down 度
+  const n = pos.clone().normalize(), m = LC.clone().sub(pos).normalize();
+  const fwd = m.addScaledVector(n, -m.dot(n)).normalize().applyAxisAngle(n, yawDeg * Math.PI / 180), d = downDeg * Math.PI / 180;
+  return pos.clone().addScaledVector(fwd, Math.cos(d) * 12).addScaledVector(n, -Math.sin(d) * 12);
+}
+K[0].up = K[0].pos.clone().normalize();
+K[0].tgt = horizonShot(K[0].pos, 9, 37.5);
+K[0].tall = { pos: K[0].pos, tgt: horizonShot(K[0].pos, 2.5, 43) };
 K[7].tgt = skim(LC, K[7].pos, V(1, 0, -.2), 42);
 K[8].tgt = skim(LC, K[8].pos, V(.15, .1, 1), 30);        // 朝着太阳那边看：迎光的环形山，影子朝向镜头
 
 const narrow = () => stage.width < 760 || stage.width < stage.height * .8;
 const smooth = f => { const x = clamp01((f - .1) / .8); return x * x * x * (x * (x * 6 - 15) + 10); };   // 每段中间停一停
-const da = V(), db = V(), axis = V(), cam = { pos: V(), tgt: V(), sx: 0, sy: 0 };
+const da = V(), db = V(), axis = V(), cam = { pos: V(), tgt: V(), up: V(0, 1, 0), sx: 0, sy: 0 };
 function pose(u, o) {
   const tall = narrow(), i = Math.min(K.length - 2, Math.max(0, Math.floor(u))), f = smooth(u - i), a = K[i], b = K[i + 1];
   const ap = tall && a.tall ? a.tall.pos : a.pos, bp = tall && b.tall ? b.tall.pos : b.pos, at_ = tall && a.tall ? a.tall.tgt : a.tgt, bt = tall && b.tall ? b.tall.tgt : b.tgt;
@@ -73,28 +80,49 @@ function pose(u, o) {
     if (ang > 1e-4) o.pos.applyAxisAngle(axis.crossVectors(da, db).normalize(), ang * f);
     o.pos.multiplyScalar(la * Math.pow(lb / la, f)).add(c);
   } else o.pos.lerpVectors(ap, bp, f);
-  o.tgt.lerpVectors(at_, bt, f);
+  o.tgt.lerpVectors(at_, bt, f); o.up.lerpVectors(a.up || UP, b.up || UP, f).normalize();
   o.sx = tall ? 0 : lerp(a.sx, b.sx, f); o.sy = tall ? lerp(i ? -.24 : 0, -.24, f) : 0;
 }
 
 // ── 页面文字（切换语言时整体重排）──
 const voyage = $('#voyage'), rail = $('#rail'); let legs = [], centers = [];
+const ARROW_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+const ARROW_UR = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>';
+function splitTitle(el, text) {                           // 中文逐字、英文逐词，给入场动画用；保留真实空格方便复制和读屏
+  const zh = lang() === 'zh', parts = zh ? [...text] : text.split(/\s+/);
+  el.innerHTML = parts.map((w, i) => `<span class="bt-word" style="--i:${i}">${w}</span>`).join(zh ? '' : ' ');
+  el.setAttribute('aria-label', text);
+  el.style.setProperty('--stagger', zh ? '110ms' : '120ms'); el.style.setProperty('--base', '380ms');
+}
 function build() {
   document.title = `${t(ME.name)} · Terra → Luna`;
-  $('#mark-name').textContent = t(ME.name); $('#lang').textContent = lang() === 'zh' ? 'EN' : '中文'; $('#hub').textContent = t(L('星系', 'The system'));
+  $('#mark-name').textContent = t(ME.name); $('#lang').textContent = lang() === 'zh' ? 'EN' : '中文';
+  $('#hub').innerHTML = `${t(L('星系', 'The system'))}${ARROW_UR}`;
   $('#loading').textContent = t(L('正在加注燃料', 'Fuelling')); $('#pin').textContent = t(ME.place);
   $('#h-la').textContent = t(L('距地球', 'From Terra')); $('#h-lb').textContent = t(L('距月球', 'To Luna'));
-  voyage.innerHTML = `<section class="leg hero" data-i="0" id="top">
-      <div><p class="eyebrow">Terra → Luna · ${t(L('地月航线', 'A voyage'))}</p><h1>${t(ME.name)}</h1><p class="tagline">${t(ME.tagline)}</p><p class="go">${t(L('向下滚动，出发', 'Scroll to lift off'))} ↓</p></div>
-    </section>` + K.slice(1).map((k, n) => { const s = byId(k.id);
-      return `<section class="leg ${k.sx < 0 ? 'right' : 'left'}" data-i="${n + 1}" id="leg-${k.id}" style="--tint:${s.tint}"><article class="panel glass">
-        <p class="legno">${String(n + 1).padStart(2, '0')} / ${String(K.length - 1).padStart(2, '0')} · ${t(k.phase)}</p>${sheetHTML(s)}</article></section>`; }).join('');
+  const total = String(K.length - 1).padStart(2, '0');
+  voyage.innerHTML = `<section class="leg hero" data-i="0" id="top"><div class="hero-inner">
+      <p class="badge glass glass--thin appear appear--pop" style="--d:.24s"><b>T−0</b><span>${t(L('一段 384,400 公里的自我介绍', 'A 384,400 km introduction'))}</span></p>
+      <h1 class="display" id="hero-name"></h1>
+      <p class="lede appear appear--soft" style="--d:.95s;animation-duration:1.25s">${t(L('从地球出发，飞向月球。沿途九站，每一站讲我的一部分。', 'Leave Earth, cross to the Moon. Nine stops on the way, each one a part of me.'))}</p>
+      <div class="ctas"><a class="btn appear appear--btn" style="--d:1.08s" href="#leg-about" id="go">${t(L('出发', 'Lift off'))}<i>${ARROW_DOWN}</i></a>
+        <a class="link appear appear--side" style="--d:1.2s" id="go-system" href="${$('#hub').getAttribute('href')}">${t(L('直接看星系', 'Skip to the system'))}${ARROW_UR}</a></div>
+    </div></section>` + K.slice(1).map((k, n) => { const s = byId(k.id);
+      return `<section class="leg ${k.sx < 0 ? 'right' : 'left'}" data-i="${n + 1}" id="leg-${k.id}"><article class="panel glass">
+        <p class="legno"><span class="n">${String(n + 1).padStart(2, '0')}</span><i></i><span>${t(k.phase)}</span><em>/ ${total}</em></p>${sheetHTML(s)}</article></section>`; }).join('');
+  splitTitle($('#hero-name'), t(ME.name));
+  $('#go').onclick = e => { e.preventDefault(); scrollTo({ top: centers[1], behavior: 'smooth' }); };
   rail.innerHTML = K.map((k, i) => `<button data-i="${i}"><i></i><span>${t(k.id ? byId(k.id).title : k.phase)}</span></button>`).join('');
   legs = [...voyage.children]; legs.forEach(el => seen.observe(el)); measure();
 }
 const seen = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && e.target.classList.add('in')), { threshold: .12 });
 function measure() {                                     // 每一段「到站」的滚动位置：电脑上是卡片居中时；手机上是卡片顶到屏幕中间偏上时，上半屏留给星球
-  const tall = narrow(); centers = legs.map((el, i) => !i ? 0 : tall ? el.querySelector('.panel').offsetTop - innerHeight * .46 : el.offsetTop + el.offsetHeight / 2 - innerHeight / 2);
+  const tall = narrow(); centers = legs.map((el, i) => {
+    if (!i) return 0;
+    const p = el.querySelector('.panel'), top = p.offsetTop, h = p.offsetHeight;
+    if (tall) return top - innerHeight * .46;
+    return h > innerHeight - 170 ? top - 96 : top + h / 2 - innerHeight / 2;   // 面板比屏幕高时，上沿停在导航下方
+  });
 }
 function scrollU() {                                      // 滚动位置 → 第几段航程（带小数）
   const y = scrollY; let i = 0; while (i < centers.length - 2 && y >= centers[i + 1]) i++;
@@ -107,18 +135,23 @@ new ResizeObserver(measure).observe(voyage);
 
 // ── 每一帧 ──
 const fmt = n => Math.round(n).toLocaleString('en-US'), scr = {}, tmp = V(), pinEl = $('#pin');
-let u = 0, shown = -1, kmShown = -1;
+let u = 0, shown = -1, kmShown = -1, launchedAt = -1;
 stage.onFrame((dt, time) => {
   u += (scrollU() - u) * (1 - Math.exp(-dt * 4.5));
   pose(u, cam);
-  camera.position.copy(cam.pos); camera.lookAt(cam.tgt); camera.updateMatrixWorld();
+  if (u < 1) {                                            // 开场：倒计时结束后，镜头从高处缓缓落到停泊高度（2.4 秒）
+    const e = launchedAt < 0 ? 0 : 1 - Math.pow(1 - clamp01((time - launchedAt) / 2.4), 3);
+    cam.pos.multiplyScalar(1 + .2 * (1 - e) * (1 - u));
+  }
+  camera.position.copy(cam.pos); camera.up.copy(cam.up); camera.lookAt(cam.tgt); camera.updateMatrixWorld();
   stage.shift.x = cam.sx; stage.shift.y = cam.sy;
   terra.update(dt, time); luna.update(dt, time);
   pin.scale.setScalar(.75 + .2 * Math.sin(time * 2.2));
   line.material.opacity = .5 * clamp01(u - .6) * clamp01(5.6 - u);          // 航线只在途中显示，到月球跟前就隐去
 
   const dT = Math.max(0, cam.pos.length() - RE), dL = Math.max(0, cam.pos.distanceTo(LC) - RL), km = Math.round(dT / (dT + dL) * 3844) * 100;
-  if (km !== kmShown) { kmShown = km; $('#h-from').textContent = fmt(km); $('#h-to').textContent = fmt(384400 - km); $('#h-bar').style.width = (km / 3844).toFixed(1) + '%'; }
+  if (km !== kmShown) { kmShown = km; $('#h-from').textContent = fmt(km); $('#h-to').textContent = fmt(384400 - km);
+    $('#h-bar').style.transform = `scaleX(${(km / 384400).toFixed(4)})`; $('#h-dot').style.left = (km / 3844).toFixed(2) + '%'; }
   const now = Math.round(u);
   if (now !== shown) { shown = now; for (const b of rail.children) b.classList.toggle('on', +b.dataset.i === now); }
 
@@ -128,5 +161,14 @@ stage.onFrame((dt, time) => {
 });
 
 build();
-Promise.race([Promise.all([terra.ready, luna.ready]), new Promise(r => setTimeout(r, 15000))]).then(() => document.body.classList.add('ready'));
+addEventListener('animationend', e => { if (e.target.classList?.contains('appear')) e.target.classList.add('is-in'); });
+let isReady = false; const t0 = performance.now(), countEl = $('#count'), lbar = $('#l-bar');
+Promise.race([Promise.all([terra.ready, luna.ready]), new Promise(r => setTimeout(r, 15000))]).then(() => { isReady = true; });
+(function countdown(now) {
+  const p = Math.min((now - t0) / 1900, isReady ? 1 : .9), n = Math.ceil(10 * (1 - p) - 1e-6);
+  if (countEl.textContent !== String(n)) countEl.textContent = n;
+  lbar.style.transform = `scaleX(${p.toFixed(3)})`;
+  if (p < 1) return requestAnimationFrame(countdown);
+  setTimeout(() => { document.body.classList.add('ready'); launchedAt = stage.time; }, 260);
+})(t0);
 stage.start();

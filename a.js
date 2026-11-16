@@ -58,7 +58,7 @@ function asteroidBelt() {                              // 火星和木星之间�
 }
 function makeLabel(sec) {
   const a = document.createElement('a');
-  a.className = 'label'; a.href = '#' + sec.id; a.style.setProperty('--tint', sec.tint);
+  a.className = 'plabel'; a.href = '#' + sec.id; a.style.setProperty('--tint', sec.tint);
   $('#labels').append(a); return a;
 }
 
@@ -68,13 +68,19 @@ for (const id of ORDER) {
   const s = byId(id), b = document.createElement('button');
   b.dataset.id = id; b.style.setProperty('--tint', s.tint); b.onclick = () => go(id); dock.append(b);
 }
+function splitTitle(el, text) {                           // 中文逐字、英文逐词入场
+  const zh = lang() === 'zh', parts = zh ? [...text] : text.split(/\s+/);
+  el.innerHTML = parts.map((w, i) => `<span class="bt-word" style="--i:${i}">${w}</span>`).join(zh ? '' : ' ');
+  el.setAttribute('aria-label', text); el.style.setProperty('--stagger', zh ? '110ms' : '120ms'); el.style.setProperty('--base', '380ms');
+}
 const star = s => lang() === 'zh' ? s.cn : s.en[0] + s.en.slice(1).toLowerCase();      // 天体名：地球 / Terra
 function texts() {                                       // 所有界面文字都从这里填，切换语言时重填一遍
-  $('#name').textContent = t(ME.name); $('#mark-name').textContent = t(ME.name); $('#tagline').textContent = t(ME.tagline);
+  splitTitle($('#name'), t(ME.name)); $('#mark-name').textContent = t(ME.name);
+  $('#tagline').textContent = t(L('我是太阳。九颗星球绕着我转，每一颗是我的一面。', 'I am the sun. Nine worlds orbit me, each one a side of who I am.'));
   document.title = `${t(ME.name)} · ${t(L('个人星系', 'Personal system'))}`;
   $('#eyebrow').textContent = 'Personal System' + (lang() === 'zh' ? ' · 个人星系' : '');
-  $('#hint').textContent = t(L('每颗星球是我的一面 · 点一颗，飞过去看看', 'Each planet is a side of me · pick one and fly there'));
-  $('#back').textContent = '← ' + t(L('回到星系', 'Back to the system')); $('#hub').textContent = t(L('航线', 'The voyage'));
+  $('#hint').textContent = t(L('点一颗星球，飞过去', 'Pick a world and fly there'));
+  $('#back').textContent = '← ' + t(L('回到星系', 'Back to the system')); $('#hub').innerHTML = `${t(L('航线', 'The voyage'))}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>`;
   $('#loading').textContent = t(L('正在点亮星系', 'Lighting the system')); $('#lang').textContent = lang() === 'zh' ? 'EN' : '中文';
   for (const p of all) { p.label.innerHTML = `<b>${t(p.sec.title)}</b><span>${star(p.sec)}</span>`; p.label.title = t(p.sec.why); }
   for (const b of dock.children) { const s = byId(b.dataset.id); b.innerHTML = `<i class="dot"></i>${t(s.title)}`; b.title = `${star(s)} · ${t(s.why)}`; }
@@ -101,7 +107,7 @@ canvas.addEventListener('click', e => { const hit = stage.pick(e.clientX, e.clie
 const pose = () => ({ pos: new THREE.Vector3(), tgt: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), sx: 0, sy: 0 });
 const cam = pose(), want = pose(), from = pose();
 const tA = new THREE.Vector3(), tB = new THREE.Vector3(), scr = {};
-let focus = null, flyT = 1, flyDur = 2, rate = 1, tOrbit = 0;
+let launched = false, focus = null, flyT = 1, flyDur = 2, rate = 1, tOrbit = 0;
 const narrow = () => stage.width < 760 || stage.width < stage.height * .8;
 
 function homePose(o, t) {                              // 俯瞰整个星系；竖屏时把相机横滚 90 度，让椭圆竖着放
@@ -147,7 +153,7 @@ stage.onFrame((dt, t) => {
 
   focus ? focusPose(want, focus) : homePose(want, t);
   if (flyT < 1) {
-    flyT = Math.min(1, flyT + dt / flyDur); const e = ease.io(flyT);
+    flyT = Math.min(1, flyT + (launched ? dt / flyDur : 0)); const e = ease.io(flyT);
     cam.pos.lerpVectors(from.pos, want.pos, e); cam.pos.y += Math.sin(Math.PI * e) * from.pos.distanceTo(want.pos) * .16;   // 飞行路线向上拱，避开太阳
     cam.tgt.lerpVectors(from.tgt, want.tgt, e); cam.up.lerpVectors(from.up, want.up, e).normalize();
     cam.sx = lerp(from.sx, want.sx, e); cam.sy = lerp(from.sy, want.sy, e);
@@ -169,6 +175,14 @@ homePose(cam, 0); cam.pos.multiplyScalar(1.7); cam.pos.y *= 1.3;
 copyPose(from, cam); flyT = 0; flyDur = 3.4;
 texts();
 if (byId(location.hash.slice(1))) apply();
-Promise.race([Promise.all([sun, ...all.map(p => p.body)].map(b => b.ready)), new Promise(r => setTimeout(r, 8000))])
-  .then(() => document.body.classList.add('ready'));
+addEventListener('animationend', e => { if (e.target.classList?.contains('appear')) e.target.classList.add('is-in'); });
+let isReady = false; const t0 = performance.now(), countEl = $('#count'), lbar = $('#l-bar');
+Promise.race([Promise.all([sun, ...all.map(p => p.body)].map(b => b.ready)), new Promise(r => setTimeout(r, 8000))]).then(() => { isReady = true; });
+(function countdown(now) {                                 // 倒计时 10 → 0；星球没准备好就停在 1
+  const p = Math.min((now - t0) / 1900, isReady ? 1 : .9), n = Math.ceil(10 * (1 - p) - 1e-6);
+  if (countEl.textContent !== String(n)) countEl.textContent = n;
+  lbar.style.transform = `scaleX(${p.toFixed(3)})`;
+  if (p < 1) return requestAnimationFrame(countdown);
+  setTimeout(() => { document.body.classList.add('ready'); launched = true; }, 260);
+})(t0);
 stage.start();
