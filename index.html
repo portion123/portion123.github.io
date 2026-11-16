@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>你的名字 · Terra → Luna</title>
+<meta name="description" content="你的名字的个人网站。一句话介绍自己：我是谁，在做什么，在意什么。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="你的名字 · Terra → Luna">
+<meta property="og:description" content="你的名字的个人网站。一句话介绍自己：我是谁，在做什么，在意什么。">
+<meta name="theme-color" content="#02030a">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="lib/site.css">
+<style>
+  html, body { height: auto; }
+  body { overflow-x: hidden; overflow-y: auto; }
+  canvas#space { pointer-events: none; }
+  #voyage { position: relative; z-index: 1; }
+
+  .top { position: fixed; z-index: 6; top: 0; left: 0; right: 0; padding: 20px 26px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  .top > * { pointer-events: auto; }
+  .mark { display: flex; align-items: center; gap: 12px; font-size: 15px; letter-spacing: .2em; }
+  .mark i { width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #dff0ff, #5aa2ff 55%, #123a8a); box-shadow: 0 0 16px #5aa2ff; }
+  .top nav { display: flex; gap: 8px; }
+  .top nav a, .top nav button { font-family: var(--tech); font-size: 12px; letter-spacing: .2em; color: var(--dim); padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(4, 6, 14, .4); }
+  .top nav a:hover, .top nav button:hover { color: var(--ink); border-color: rgba(255, 255, 255, .4); }
+
+  .leg { min-height: 150vh; display: grid; align-items: center; padding: 0 clamp(18px, 5.5vw, 84px); }
+  .leg.right { justify-items: end; } .leg.left { justify-items: start; }
+  .leg.hero { min-height: 100vh; align-items: start; justify-items: start; padding-top: 17vh; }
+  .hero h1 { font-size: clamp(48px, 8vw, 118px); font-weight: 200; letter-spacing: .1em; line-height: 1.08; margin: 20px 0 18px; text-shadow: 0 0 70px rgba(90, 150, 255, .35); }
+  .hero .tagline { font-size: clamp(15px, 1.35vw, 19px); line-height: 1.9; color: var(--dim); max-width: 27em; }
+  .hero .go { margin-top: 30px; font-family: var(--tech); font-size: 13px; letter-spacing: .22em; color: var(--faint); animation: bob 2.4s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(7px); color: var(--ink); } }
+
+  .panel { width: min(540px, 44vw); border-radius: 26px; overflow: hidden; opacity: 0; transform: translateY(46px); transition: opacity .9s, transform 1s cubic-bezier(.2, .8, .2, 1); }
+  .leg.in .panel { opacity: 1; transform: none; }
+  .panel .sheet-head .eyebrow { display: none; }
+  .panel .sheet-head { padding-top: 4px; } .panel .sheet-head h2 { margin-top: 10px; }
+  .legno { font-family: var(--tech); font-size: 12px; letter-spacing: .24em; text-transform: uppercase; color: var(--tint); padding: 28px 36px 0; }
+
+  .hud { position: fixed; z-index: 5; left: 28px; bottom: 22px; display: flex; gap: 30px; align-items: flex-end; font-family: var(--tech); pointer-events: none; text-shadow: 0 1px 12px #000; }
+  .hud small { display: block; font-size: 11px; letter-spacing: .22em; color: var(--faint); margin-bottom: 4px; text-transform: uppercase; }
+  .hud b { font-size: 24px; font-weight: 400; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .hud em { font-style: normal; font-size: 12px; color: var(--dim); margin-left: 6px; letter-spacing: .1em; }
+  .hud .bar { width: 150px; height: 1px; background: var(--line); position: relative; margin-bottom: 9px; }
+  .hud .bar i { position: absolute; left: 0; top: -1px; height: 3px; width: 0; background: linear-gradient(90deg, #6fb4ff, #e9eefb); box-shadow: 0 0 10px #6fb4ff; }
+
+  .rail { position: fixed; z-index: 5; right: 16px; top: 50%; transform: translateY(-50%); display: grid; gap: 2px; }
+  .rail button { display: flex; flex-direction: row-reverse; align-items: center; gap: 10px; padding: 6px 0 6px 12px; font-size: 12px; letter-spacing: .14em; color: var(--dim); text-shadow: 0 1px 10px #000; }
+  .rail i { width: 14px; height: 1px; background: var(--faint); transition: width .4s, background .4s; }
+  .rail span { opacity: 0; transform: translateX(6px); transition: opacity .3s, transform .3s; white-space: nowrap; }
+  .rail button:hover span { opacity: 1; transform: none; }
+  .rail button.on i { width: 26px; height: 2px; background: var(--ink); }
+
+  .pin { position: fixed; z-index: 2; left: 0; top: 0; font-size: 12px; letter-spacing: .16em; color: var(--gold); white-space: nowrap; opacity: 0; transition: opacity .5s; pointer-events: none; text-shadow: 0 1px 8px #000; }
+  .pin.on { opacity: 1; }
+  .pin::before { content: ""; display: inline-block; width: 22px; height: 1px; background: var(--gold); vertical-align: middle; margin-right: 8px; opacity: .7; }
+
+  .loader { position: fixed; inset: 0; z-index: 9; background: var(--bg); display: grid; place-items: center; align-content: center; gap: 18px; transition: opacity 1.2s .2s, visibility 0s 1.4s; font-size: 13px; letter-spacing: .3em; color: var(--dim); }
+  .loader i { width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line); border-top-color: #8fc0ff; animation: spin 1.1s linear infinite; }
+  body.ready .loader { opacity: 0; visibility: hidden; }
+  @keyframes spin { to { transform: rotate(1turn); } }
+
+  @media (max-width: 760px) {
+    .top { padding: 14px 16px; }
+    .leg { min-height: 170vh; padding: 0 12px; }
+    .leg.hero { min-height: 100vh; padding: 15vh 22px 0; }
+    .panel { width: 100%; }
+    .legno { padding: 22px 22px 0; }
+    .rail { display: none; }
+    .hud { left: 0; right: 0; bottom: 0; gap: 18px; padding: 30px 16px 12px; background: linear-gradient(to top, rgba(2, 3, 10, .94) 45%, transparent); }
+    .hud b { font-size: 18px; } .hud .bar { flex: 1; width: auto; }
+  }
+</style>
+</head>
+<body>
+<canvas id="space"></canvas>
+
+<header class="top">
+  <a class="mark" href="#top"><i></i><span id="mark-name"></span></a>
+  <nav><button id="lang" type="button"></button><a href="system.html" id="hub"></a></nav>
+</header>
+
+<main id="voyage"></main>
+<div class="pin" id="pin"></div>
+<nav class="rail" id="rail" aria-label="航线"></nav>
+<aside class="hud" aria-hidden="true">
+  <div><small id="h-la"></small><b id="h-from">0</b><em>km</em></div>
+  <div class="bar"><i id="h-bar"></i></div>
+  <div><small id="h-lb"></small><b id="h-to">384,400</b><em>km</em></div>
+</aside>
+
+<div class="loader"><i></i><span id="loading"></span></div>
+<script type="module" src="b.js"></script>
+</body>
+</html>
