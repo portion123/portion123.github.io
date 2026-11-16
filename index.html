@@ -14,8 +14,10 @@
 <style>
   html, body { height: auto; }
   body { overflow-x: clip; overflow-y: auto; }
-  canvas#space { pointer-events: none; }
-  #voyage { position: relative; z-index: 1; }
+  canvas#space { pointer-events: auto; touch-action: pan-y; }
+  #voyage { position: relative; z-index: 1; pointer-events: none; }
+  .leg { pointer-events: none; }
+  .leg .panel, .hero-inner { pointer-events: auto; }
 
   /* 导航：左边一枚玻璃圆片 + 名字，右边一条玻璃药丸 */
   .top { position: fixed; z-index: 6; top: 0; left: 0; right: 0; padding: 22px clamp(18px, 3.4vw, 48px); display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
@@ -91,6 +93,37 @@
     .hud .num { font-size: 24px; } .hud .label { font-size: 9.5px; letter-spacing: .2em; }
   }
 </style>
+<style>
+  .flight-controls { position: relative; min-width: 0; }
+  #autopilot { position: absolute; bottom: 39px; left: 50%; transform: translateX(-50%); height: 40px; padding: 0 18px; border-radius: 999px; display: flex; align-items: center; gap: 9px; white-space: nowrap; pointer-events: auto; font-size: 13px; }
+  #autopilot kbd { opacity: .6; font: inherit; font-size: 10px; border: 1px solid var(--line); padding: 3px 5px; border-radius: 4px; }
+  #log-label { position: absolute; bottom: 12px; right: 0; white-space: nowrap; }
+  .hud .bar .stop-dot { width: 5px; height: 5px; top: -2px; margin-left: -2.5px; background: rgba(255,255,255,.25); box-shadow: none; }
+  .hud .bar .stop-dot.visited { background: #f2f4f8; box-shadow: 0 0 10px var(--accent); }
+  .stop-dot.just-lit { animation: log-light 600ms var(--ease); }
+  @keyframes log-light { from { transform: scale(1.6); } 65% { transform: scale(.9); } to { transform: scale(1); } }
+  .flight-hint { margin-top: 22px; max-width: 36em; font-size: 10px; letter-spacing: .12em; line-height: 1.9; text-wrap: balance; }
+  #completion { position: fixed; z-index: 7; left: 50%; bottom: 145px; transform: translateX(-50%); width: calc(100% - 32px); max-width: 420px; padding: 28px; border-radius: 24px; background: rgba(8,10,20,.86); }
+  #completion[hidden] { display: none; }
+  #completion h2 { font-size: 30px; margin: 14px 0 10px; }
+  #completion p { color: var(--dim); font-size: 14px; }
+  #completion .actions { display: flex; align-items: center; gap: 24px; margin-top: 24px; }
+  #completion button { min-height: 44px; } #completion .btn { padding: 0 22px; }
+  .meteor-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .meteor { position: absolute; height: 1px; background: linear-gradient(90deg,#f2f4f8,rgba(137,170,204,.45),transparent); opacity: 0; animation: meteor-flight var(--duration) linear var(--delay) both; }
+  @keyframes meteor-flight { 0% { transform: translate3d(0,0,0) rotate(-35deg); opacity: 0; } 12%,75% { opacity: 1; } 100% { transform: translate3d(-85vw,60vw,0) rotate(-35deg); opacity: 0; } }
+  @media (max-width: 760px) {
+    .hud { grid-template-columns: 1fr 1fr; padding-top: 10px; row-gap: 0; }
+    .flight-controls { grid-column: 1 / -1; grid-row: 1; height: 82px; margin-bottom: 12px; }
+    #autopilot { height: 44px; bottom: 38px; } #autopilot kbd { display: none; }
+    .hud .bar { position: absolute; bottom: 0; width: 100%; margin-bottom: 0; }
+    #log-label { bottom: 10px; }
+    .flight-hint { max-width: 27em; margin-top: 12px; }
+    .hero .ctas .link, .top nav a, .top nav button { min-height: 44px; }
+    #completion { bottom: 185px; padding: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
 </head>
 <body>
 <canvas id="space"></canvas>
@@ -105,11 +138,12 @@
 <main id="voyage"></main>
 <div class="pin" id="pin"></div>
 <nav class="rail appear appear--fade" style="--d:1.3s" id="rail" aria-label="航线"></nav>
-<aside class="hud appear appear--fade" style="--d:1.25s" aria-hidden="true">
+<aside class="hud appear appear--fade" style="--d:1.25s">
   <div><span class="label" id="h-la"></span><b class="num" id="h-from">0</b><em>km</em></div>
-  <div class="bar"><i id="h-bar"></i><b id="h-dot"></b></div>
+  <div class="flight-controls"><button id="autopilot" class="glass glass--thin" type="button" aria-pressed="false"></button><span id="log-label" class="label"></span><div class="bar"><i id="h-bar"></i><span id="log-dots"></span><b id="h-dot"></b></div></div>
   <div class="r"><span class="label" id="h-lb"></span><b class="num" id="h-to">384,400</b><em>km</em></div>
 </aside>
+<section id="completion" class="glass" hidden aria-live="polite" aria-labelledby="completion-title"><span class="label" id="completion-label"></span><h2 class="display" id="completion-title"></h2><p id="completion-subtitle"></p><div class="actions"><button class="btn" id="back-earth" type="button"></button><button class="link" id="close-completion" type="button"></button></div></section>
 
 <div class="loader" aria-hidden="true">
   <span class="label">T-minus</span>

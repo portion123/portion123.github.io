@@ -6,13 +6,15 @@ import { ME, byId, sheetHTML, L, t, lang, setLang } from './lib/site.js';
 
 const $ = s => document.querySelector(s);
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const reduced = matchMedia('(prefers-reduced-motion: reduce)'), touch = matchMedia('(hover: none)');
 const stage = createStage($('#space'), { fov: 38 });
 const { scene, camera } = stage;
 
 // ── 世界：地球在原点，月球在 +X 方向。距离压缩过（真实比例下两者没法同框），大小比例是真的 ──
 const RE = 10, RL = 2.73, O = V(0, 0, 0), LC = V(160, 0, 0), UP = V(0, 1, 0);
 stage.sun.set(.233, .279, .932).multiplyScalar(30000);
-scene.add(createStars(stage, { count: stage.mobile ? 12000 : 22000 }));
+const stars = createStars(stage, { count: stage.mobile ? 12000 : 22000, twinkle: !reduced.matches }); scene.add(stars);
+reduced.addEventListener('change', () => stars.traverse(o => { if (o.material?.uniforms?.uTwinkle) o.material.uniforms.uTwinkle.value = reduced.matches ? 0 : 1; }));
 scene.add(createNebula(stage, { colors: ['#14306e', '#3a2a7a', '#0d5f78'], intensity: .45, seed: 7 }));
 
 const terra = createBody(stage, 'terra', { radius: RE, spin: .003 });
@@ -86,6 +88,117 @@ function pose(u, o) {
 
 // ── 页面文字（切换语言时整体重排）──
 const voyage = $('#voyage'), rail = $('#rail'); let legs = [], centers = [];
+const autopilot = $('#autopilot'), logLabel = $('#log-label'), completion = $('#completion');
+let flying = false, flightRaf = 0, dwellTimer = 0, completionTimer = 0, loggedDone = false;
+const visited = new Set(), dwell = new Float64Array(10), stopDots = [];
+try { const saved = JSON.parse(localStorage.getItem('cosmos-log')); if (Array.isArray(saved)) for (const k of saved) if (Number.isInteger(k) && k >= 1 && k <= 9) visited.add(k); } catch (_) {}
+try { loggedDone = !!localStorage.getItem('cosmos-log-done'); } catch (_) {}
+for (let k = 1; k <= 9; k++) { const dot = document.createElement('b'); dot.className = 'stop-dot'; dot.classList.toggle('visited', visited.has(k)); $('#log-dots').append(dot); stopDots.push(dot); }
+const stopPose = { pos: V(), tgt: V(), up: V(), sx: 0, sy: 0 };
+function kilometers(pos) { const a = Math.max(0, pos.length() - RE), b = Math.max(0, pos.distanceTo(LC) - RL); return Math.round(a / (a + b) * 3844) * 100; }
+function measureStops() { for (let k = 1; k <= 9; k++) { pose(k, stopPose); stopDots[k - 1].style.left = kilometers(stopPose.pos) / 3844 + '%'; } }
+function flightText() {
+  autopilot.innerHTML = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">${flying ? '<path d="M3 2h3v12H3zM10 2h3v12h-3z"/>' : '<path d="M4 2l10 6-10 6z"/>'}</svg><span>${t(flying ? L('暂停', 'Pause') : L('自动驾驶', 'Autopilot'))}</span>${flying ? '' : `<kbd>${t(L('空格', 'Space'))}</kbd>`}`;
+  autopilot.setAttribute('aria-pressed', String(flying));
+}
+function interactionText() {
+  flightText(); logLabel.textContent = `${t(L('航行日志', 'Log'))} ${visited.size} / 9`;
+  $('#completion-label').textContent = t(L('任务完成', 'Mission complete'));
+  $('#completion-title').textContent = t(L('九站全部抵达。', 'All nine stops reached.'));
+  $('#completion-subtitle').textContent = t(L('现在，你认识我了。', 'Now you know me.'));
+  $('#back-earth').textContent = t(L('回到地球', 'Back to Earth')); $('#close-completion').textContent = t(L('关闭', 'Close'));
+}
+function stopFlight() { cancelAnimationFrame(flightRaf); clearTimeout(dwellTimer); if (flying) { flying = false; flightText(); } }
+const cubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+function flyTo(k, seconds, done) {
+  cancelAnimationFrame(flightRaf);
+  const from = scrollY, start = performance.now();
+  function step(now) {
+    const p = reduced.matches ? 1 : clamp01((now - start) / (seconds * 1000));
+    window.scrollTo({ top: lerp(from, centers[k], cubic(p)), behavior: 'instant' });
+    if (p < 1) flightRaf = requestAnimationFrame(step); else { flightRaf = 0; if (done) done(); }
+  }
+  flightRaf = requestAnimationFrame(step);
+}
+function jumpTo(k, seconds = 1.2) { stopFlight(); flyTo(Math.max(0, Math.min(9, k)), seconds); }
+function toggleFlight() {
+  if (flying) return stopFlight();
+  stopFlight(); flying = true; flightText();
+  function next(k) { flyTo(k, 2.4, () => { if (!flying) return; if (k === 9) { flying = false; flightText(); return; } dwellTimer = setTimeout(() => next(k + 1), 3500); }); }
+  const k = Math.round(u); if (k === 9) flyTo(0, 2.4, () => { dwellTimer = setTimeout(() => next(1), 3500); }); else next(k + 1);
+}
+autopilot.onclick = toggleFlight;
+addEventListener('wheel', stopFlight, { passive: true });
+addEventListener('touchstart', e => { if (!autopilot.contains(e.target)) stopFlight(); }, { passive: true });
+addEventListener('pointerdown', e => { if (!autopilot.contains(e.target)) stopFlight(); }, { passive: true });
+addEventListener('keydown', e => {
+  const space = e.code === 'Space' || e.key === ' ';
+  if (!space) stopFlight();
+  if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return;
+  if (space) { e.preventDefault(); if (!e.repeat) toggleFlight(); return; }
+  let k; const current = Math.round(scrollU());
+  if (['ArrowDown', 'PageDown', 'j'].includes(e.key)) k = current + 1;
+  if (['ArrowUp', 'PageUp', 'k'].includes(e.key)) k = current - 1;
+  if (e.key === 'Home') k = 0; if (e.key === 'End') k = 9;
+  if (k !== undefined) { e.preventDefault(); jumpTo(k); }
+});
+function closeCompletion() { completion.hidden = true; clearTimeout(completionTimer); }
+$('#close-completion').onclick = closeCompletion;
+$('#back-earth').onclick = () => { closeCompletion(); jumpTo(0, 2.4); };
+function celebrate() {
+  loggedDone = true; try { localStorage.setItem('cosmos-log-done', '1'); } catch (_) {}
+  completion.hidden = false; completionTimer = setTimeout(closeCompletion, 9000);
+  if (reduced.matches) return;
+  const layer = document.createElement('div'); layer.className = 'meteor-layer'; layer.setAttribute('aria-hidden', 'true');
+  let delay = 0;
+  for (let i = 0; i < 7; i++) { const meteor = document.createElement('i'); meteor.className = 'meteor'; meteor.style.cssText = `left:${65 + Math.random() * 45}%;top:${Math.random() * 40}%;width:${120 + Math.random() * 100}px;--duration:${1.1 + Math.random() * .5}s;--delay:${delay}ms`; delay += 120 + Math.random() * 140; layer.append(meteor); }
+  document.body.append(layer); setTimeout(() => layer.remove(), delay + 1700);
+}
+function updateLog(dt) {
+  const k = Math.round(u);
+  if (k < 1 || k > 9 || visited.has(k) || Math.abs(u - k) >= .18) return;
+  dwell[k] += dt; if (dwell[k] < .6) return;
+  visited.add(k); const dot = stopDots[k - 1]; dot.classList.add('visited', 'just-lit'); setTimeout(() => dot.classList.remove('just-lit'), 600);
+  try { localStorage.setItem('cosmos-log', JSON.stringify([...visited])); } catch (_) {}
+  interactionText(); if (visited.size === 9 && !loggedDone) celebrate();
+}
+
+// 横向拖动与松手后的惯性，月球回到潮汐锁定角度。
+const canvas = $('#space'), pickBodies = [terra.mesh, luna.mesh], samples = new Float64Array(8);
+let dragged = null, pointerId = -1, lastX = 0, startX = 0, startY = 0, startAt = 0, moved = 0, sampleIndex = 0, sampleCount = 0, earthVelocity = 0, moonVelocity = 0;
+function picked(e) { const hit = stage.pick(e.clientX, e.clientY, pickBodies); if (!hit) return null; let obj = hit.object; while (obj) { if (pickBodies.includes(obj)) return obj; obj = obj.parent; } return null; }
+canvas.addEventListener('pointerdown', e => {
+  if (pointerId !== -1 || e.button !== 0) return;
+  const mesh = picked(e); if (!mesh) return;
+  stopFlight(); dragged = mesh; pointerId = e.pointerId; startX = lastX = e.clientX; startY = e.clientY; startAt = e.timeStamp; moved = sampleIndex = sampleCount = 0;
+  if (mesh === terra.mesh) earthVelocity = 0; else moonVelocity = 0;
+  samples[0] = lastX; samples[1] = e.timeStamp; sampleCount = 1; sampleIndex = 1;
+  canvas.setPointerCapture(pointerId); canvas.style.cursor = 'grabbing';
+});
+canvas.addEventListener('pointermove', e => {
+  if (!dragged) { canvas.style.cursor = picked(e) ? 'grab' : ''; return; }
+  if (e.pointerId !== pointerId) return;
+  const dx = e.clientX - lastX; dragged.rotation.y += dx * .008; lastX = e.clientX;
+  moved = Math.max(moved, Math.hypot(e.clientX - startX, e.clientY - startY));
+  samples[sampleIndex * 2] = lastX; samples[sampleIndex * 2 + 1] = e.timeStamp; sampleIndex = (sampleIndex + 1) % 4; sampleCount = Math.min(4, sampleCount + 1);
+});
+function releasePlanet(e) {
+  if (!dragged || e.pointerId !== pointerId) return;
+  const oldest = sampleCount === 4 ? sampleIndex : 0, latest = (sampleIndex + 3) % 4;
+  const elapsed = samples[latest * 2 + 1] - samples[oldest * 2 + 1];
+  let velocity = elapsed > 0 && e.timeStamp - samples[latest * 2 + 1] < 100 ? (samples[latest * 2] - samples[oldest * 2]) * .008 / (elapsed / 1000) : 0;
+  if (e.type === 'pointercancel' || reduced.matches) velocity = 0;
+  if (dragged === terra.mesh) { if (e.type === 'pointerup' && e.pointerType === 'touch' && e.timeStamp - startAt <= 250 && moved <= 6 && !reduced.matches) velocity = 3; earthVelocity = velocity; }
+  else { moonVelocity = velocity; if (reduced.matches) luna.mesh.rotation.y = Math.PI; }
+  dragged = null; pointerId = -1; if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId); canvas.style.cursor = '';
+}
+canvas.addEventListener('pointerup', releasePlanet); canvas.addEventListener('pointercancel', releasePlanet); canvas.addEventListener('lostpointercapture', releasePlanet);
+canvas.addEventListener('pointerleave', () => { if (!dragged) canvas.style.cursor = ''; });
+function updatePlanets(dt) {
+  if (reduced.matches) { earthVelocity = moonVelocity = 0; if (dragged !== luna.mesh) luna.mesh.rotation.y = Math.PI; return; }
+  if (dragged !== terra.mesh) { const decay = Math.exp(-Math.LN2 * dt / .8); terra.mesh.rotation.y += earthVelocity * (1 - decay) / (Math.LN2 / .8); earthVelocity *= decay; }
+  if (dragged !== luna.mesh) { const x = luna.mesh.rotation.y - Math.PI, omega = 6, c = moonVelocity + omega * x, decay = Math.exp(-omega * dt); luna.mesh.rotation.y = Math.PI + (x + c * dt) * decay; moonVelocity = (moonVelocity - omega * c * dt) * decay; }
+}
 const ARROW_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
 const ARROW_UR = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>';
 function splitTitle(el, text) {                           // 中文逐字、英文逐词，给入场动画用；保留真实空格方便复制和读屏
@@ -107,13 +220,14 @@ function build() {
       <p class="lede appear appear--soft" style="--d:.95s;animation-duration:1.25s">${t(L('从地球出发，飞向月球。沿途九站，每一站讲我的一部分。', 'Leave Earth, cross to the Moon. Nine stops on the way, each one a part of me.'))}</p>
       <div class="ctas"><a class="btn appear appear--btn" style="--d:1.08s" href="#leg-about" id="go">${t(L('出发', 'Lift off'))}<i>${ARROW_DOWN}</i></a>
         <a class="link appear appear--side" style="--d:1.2s" id="go-system" href="${$('#hub').getAttribute('href')}">${t(L('直接看星系', 'Skip to the system'))}${ARROW_UR}</a></div>
+      <p class="label flight-hint appear appear--fade" style="--d:1.35s">${t(touch.matches ? L('左右拖动地球 · 点「自动驾驶」看完全程', 'Swipe Earth sideways · tap Autopilot for the whole trip') : L('拖动地球 · 空格键自动驾驶 · ↑↓ 切换站点', 'Drag Earth · Space for autopilot · ↑↓ to jump'))}</p>
     </div></section>` + K.slice(1).map((k, n) => { const s = byId(k.id);
       return `<section class="leg ${k.sx < 0 ? 'right' : 'left'}" data-i="${n + 1}" id="leg-${k.id}"><article class="panel glass">
         <p class="legno"><span class="n">${String(n + 1).padStart(2, '0')}</span><i></i><span>${t(k.phase)}</span><em>/ ${total}</em></p>${sheetHTML(s)}</article></section>`; }).join('');
   splitTitle($('#hero-name'), t(ME.name));
-  $('#go').onclick = e => { e.preventDefault(); scrollTo({ top: centers[1], behavior: 'smooth' }); };
+  $('#go').onclick = e => { e.preventDefault(); jumpTo(1); };
   rail.innerHTML = K.map((k, i) => `<button data-i="${i}"><i></i><span>${t(k.id ? byId(k.id).title : k.phase)}</span></button>`).join('');
-  legs = [...voyage.children]; legs.forEach(el => seen.observe(el)); measure();
+  seen.disconnect(); legs = [...voyage.children]; legs.forEach(el => seen.observe(el)); measure(); interactionText();
 }
 const seen = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && e.target.classList.add('in')), { threshold: .12 });
 function measure() {                                     // 每一段「到站」的滚动位置：电脑上是卡片居中时；手机上是卡片顶到屏幕中间偏上时，上半屏留给星球
@@ -123,39 +237,52 @@ function measure() {                                     // 每一段「到站�
     if (tall) return top - innerHeight * .46;
     return h > innerHeight - 170 ? top - 96 : top + h / 2 - innerHeight / 2;   // 面板比屏幕高时，上沿停在导航下方
   });
+  measureStops();
 }
 function scrollU() {                                      // 滚动位置 → 第几段航程（带小数）
   const y = scrollY; let i = 0; while (i < centers.length - 2 && y >= centers[i + 1]) i++;
   return i + clamp01((y - centers[i]) / Math.max(1, centers[i + 1] - centers[i]));
 }
-rail.addEventListener('click', e => { const b = e.target.closest('button'); if (b) scrollTo({ top: centers[+b.dataset.i], behavior: 'smooth' }); });
+rail.addEventListener('click', e => { const b = e.target.closest('button'); if (b) jumpTo(+b.dataset.i); });
 $('#lang').onclick = () => setLang(lang() === 'zh' ? 'en' : 'zh');
 addEventListener('langchange', build); addEventListener('resize', measure);
 new ResizeObserver(measure).observe(voyage);
 
 // ── 每一帧 ──
 const fmt = n => Math.round(n).toLocaleString('en-US'), scr = {}, tmp = V(), pinEl = $('#pin');
+const previousPosition = V(), velocity = V(), flightDirection = V(0, 0, -1), foe = V(), foeScreen = {}, facingNormal = V(), facingView = V();
+let warp = 0, velocityReady = false;
 let u = 0, shown = -1, kmShown = -1, launchedAt = -1;
 stage.onFrame((dt, time) => {
-  u += (scrollU() - u) * (1 - Math.exp(-dt * 4.5));
+  u += (scrollU() - u) * (reduced.matches ? 1 : 1 - Math.exp(-dt * 4.5));
   pose(u, cam);
   if (u < 1) {                                            // 开场：倒计时结束后，镜头从高处缓缓落到停泊高度（2.4 秒）
-    const e = launchedAt < 0 ? 0 : 1 - Math.pow(1 - clamp01((time - launchedAt) / 2.4), 3);
+    const e = reduced.matches ? 1 : launchedAt < 0 ? 0 : 1 - Math.pow(1 - clamp01((time - launchedAt) / 2.4), 3);
     cam.pos.multiplyScalar(1 + .2 * (1 - e) * (1 - u));
   }
   camera.position.copy(cam.pos); camera.up.copy(cam.up); camera.lookAt(cam.tgt); camera.updateMatrixWorld();
   stage.shift.x = cam.sx; stage.shift.y = cam.sy;
-  terra.update(dt, time); luna.update(dt, time);
-  pin.scale.setScalar(.75 + .2 * Math.sin(time * 2.2));
+  velocity.subVectors(cam.pos, previousPosition).divideScalar(Math.max(dt, .001)); previousPosition.copy(cam.pos);
+  const speed = velocityReady ? velocity.length() : 0; velocityReady = true;
+  const targetWarp = THREE.MathUtils.smoothstep(speed, 4, 55);
+  warp = reduced.matches ? 0 : warp + (targetWarp - warp) * (1 - Math.exp(-dt * 6));
+  if (speed > .001) flightDirection.copy(velocity).normalize();
+  foe.copy(cam.pos).addScaledVector(flightDirection, 1000); stage.project(foe, foeScreen);
+  let warpSign = 1;
+  if (foeScreen.behind) { warpSign = -1; foe.copy(cam.pos).addScaledVector(flightDirection, -1000); stage.project(foe, foeScreen); }
+  stars.setWarp(warp * warpSign, foeScreen.x / stage.width * 2 - 1, -(foeScreen.y / stage.height * 2 - 1));
+  camera.fov = 38 + 7 * warp;
+  terra.update(reduced.matches ? 0 : dt, reduced.matches ? 0 : time); luna.update(reduced.matches ? 0 : dt, reduced.matches ? 0 : time); updatePlanets(dt); updateLog(dt);
+  pin.scale.setScalar(reduced.matches ? .75 : .75 + .2 * Math.sin(time * 2.2));
   line.material.opacity = .5 * clamp01(u - .6) * clamp01(5.6 - u);          // 航线只在途中显示，到月球跟前就隐去
 
-  const dT = Math.max(0, cam.pos.length() - RE), dL = Math.max(0, cam.pos.distanceTo(LC) - RL), km = Math.round(dT / (dT + dL) * 3844) * 100;
+  const km = kilometers(cam.pos);
   if (km !== kmShown) { kmShown = km; $('#h-from').textContent = fmt(km); $('#h-to').textContent = fmt(384400 - km);
     $('#h-bar').style.transform = `scaleX(${(km / 384400).toFixed(4)})`; $('#h-dot').style.left = (km / 3844).toFixed(2) + '%'; }
   const now = Math.round(u);
   if (now !== shown) { shown = now; for (const b of rail.children) b.classList.toggle('on', +b.dataset.i === now); }
 
-  pin.getWorldPosition(tmp); const facing = tmp.clone().normalize().dot(cam.pos.clone().sub(tmp).normalize());   // 城市标签：只在开头两段、且朝向镜头时显示
+  pin.getWorldPosition(tmp); const facing = facingNormal.copy(tmp).normalize().dot(facingView.copy(cam.pos).sub(tmp).normalize());   // 城市标签：只在开头两段、且朝向镜头时显示
   const s = stage.project(tmp, scr), on = u > .55 && u < 1.6 && facing > .25 && !s.behind;
   pinEl.classList.toggle('on', on); if (on) pinEl.style.transform = `translate3d(${(s.x + 10).toFixed(1)}px,${(s.y - 8).toFixed(1)}px,0)`;
 });
@@ -165,7 +292,7 @@ addEventListener('animationend', e => { if (e.target.classList?.contains('appear
 let isReady = false; const t0 = performance.now(), countEl = $('#count'), lbar = $('#l-bar');
 Promise.race([Promise.all([terra.ready, luna.ready]), new Promise(r => setTimeout(r, 15000))]).then(() => { isReady = true; });
 (function countdown(now) {
-  const p = Math.min((now - t0) / 1900, isReady ? 1 : .9), n = Math.ceil(10 * (1 - p) - 1e-6);
+  const p = reduced.matches ? (isReady ? 1 : 0) : Math.min((now - t0) / 1900, isReady ? 1 : .9), n = Math.ceil(10 * (1 - p) - 1e-6);
   if (countEl.textContent !== String(n)) countEl.textContent = n;
   lbar.style.transform = `scaleX(${p.toFixed(3)})`;
   if (p < 1) return requestAnimationFrame(countdown);

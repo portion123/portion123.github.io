@@ -64,11 +64,29 @@
   body.ready .loader { opacity: 0; visibility: hidden; }
   body.ready .loader .count { transform: scale(1.08); filter: blur(8px); }
 
+  #space { cursor: grab; }
+  .top nav a, .top nav button, .dock button, .sheet .bar button, .mark { min-height: 44px; min-width: 44px; }
+  .plabel { min-height: 44px; align-items: center; color: var(--dim); }
+  .plabel::before { transition: width .25s var(--ease); }
+  .plabel b { transition: color .25s; }
+  .plabel span { opacity: .65; transition: opacity .25s; }
+  .plabel.hot b, .plabel:hover b { color: var(--ink); }
+  .plabel.hot::before, .plabel:hover::before { width: 26px; }
+  .plabel.hot span, .plabel:hover span { opacity: 1; }
+  .dock button.hot { background: rgba(255, 255, 255, .1); color: var(--ink); }
+  .dock button { flex-shrink: 0; }
+  #time-boost { position: fixed; z-index: 3; top: 0; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; color: var(--gold); font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  #time-boost.on { opacity: 1; }
+  #time-boost .num { font-size: 24px; min-width: 2ch; }
+  .hero .hint { line-height: 1.9; letter-spacing: .12em; text-transform: none; max-width: 46em; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
   @media (max-width: 760px) {
     .top { padding: 14px 16px; } .mark .disc { width: 40px; height: 40px; } .mark span { display: none; }
     .hero { left: 22px; right: 22px; bottom: auto; top: 76px; }
     .hero h1 { margin: 12px 0 10px; }
-    .hero .hint { display: none; }
+    .hero .hint { display: block; margin-top: 12px; font-size: 10px; letter-spacing: .04em; max-width: 32em; }
     .dock { left: 12px; right: 12px; bottom: 14px; transform: none; max-width: none; border-radius: 22px; }
     body.focus .dock { left: 12px; max-width: none; opacity: 0; pointer-events: none; }
     .sheet { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 62vh; border-radius: 24px; transform: translateY(calc(100% + 30px)); }
@@ -93,6 +111,7 @@
 </section>
 
 <div id="labels"></div>
+<div id="time-boost" class="glass glass--thin" aria-hidden="true"><span id="time-word"></span><span>×<b class="num" id="time-multiplier">1</b></span></div>
 <nav class="dock glass" id="dock" aria-label="栏目"></nav>
 
 <aside class="sheet glass" id="sheet" aria-hidden="true">
